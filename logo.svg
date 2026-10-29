@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="OficinaPro">
+  <title>OficinaPro</title>
+  <rect width="256" height="256" rx="56" fill="#1E293B"/>
+
+  <!-- prancheta de checklist -->
+  <rect x="52" y="46" width="112" height="150" rx="14" fill="none" stroke="#F8FAFC" stroke-width="10"/>
+  <rect x="86" y="34" width="44" height="22" rx="8" fill="#F97316"/>
+
+  <path d="M74 92 l10 10 l18 -20" fill="none" stroke="#22C55E" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="112" y1="92" x2="146" y2="92" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round"/>
+
+  <path d="M74 128 l10 10 l18 -20" fill="none" stroke="#22C55E" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="112" y1="128" x2="146" y2="128" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- chave de boca -->
+  <line x1="170" y1="200" x2="215" y2="155" stroke="#F97316" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="220" cy="150" r="16" fill="#F97316"/>
+  <circle cx="220" cy="150" r="7" fill="#1E293B"/>
+</svg>
