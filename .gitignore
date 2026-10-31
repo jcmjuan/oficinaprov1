@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+documentos/
+prints/
+Etapa3.pdf
