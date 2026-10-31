@@ -142,6 +142,11 @@ class RepositorioOficina:
             r = conn.cursor().execute("SELECT * FROM mecanicos WHERE id = ?", (id_mec,)).fetchone()
             return Mecanico(r["nome"], r["telefone"], r["especialidade"], r["taxa_comissao"], r["id"]) if r else None
 
+    def atualizar_mecanico(self, id_mec: int, mecanico: Mecanico) -> None:
+        with self.db.sessao() as conn:
+            conn.cursor().execute("UPDATE mecanicos SET nome = ?, telefone = ?, especialidade = ?, taxa_comissao = ? WHERE id = ?",
+                                  (mecanico.nome, mecanico.telefone, mecanico.especialidade, mecanico.taxa_comissao, id_mec))
+
     # --- VEÍCULOS ---
     def salvar_veiculo(self, veiculo: Veiculo) -> int:
         with self.db.sessao() as conn:
@@ -270,6 +275,12 @@ class RepositorioOficina:
             } for r in linhas]
 
     # --- ESTOQUE COM MARGEM ---
+    def atualizar_peca_estoque(self, nome: str, qtd: int, preco_custo: float, margem_lucro: float) -> None:
+        """Atualiza todos os dados de uma peça já cadastrada (edição direta, sem somar)."""
+        with self.db.sessao() as conn:
+            conn.cursor().execute("UPDATE estoque SET quantidade = ?, preco_custo = ?, margem_lucro = ? WHERE nome = ?",
+                                  (qtd, preco_custo, margem_lucro, nome))
+
     def salvar_peca_estoque(self, nome: str, qtd: int, preco_custo: float, margem_lucro: float) -> bool:
         """Cadastra a peça ou, se o nome já existir, soma a quantidade e atualiza custo/margem.
         Retorna True se criou um registro novo, False se apenas atualizou um existente."""

@@ -95,7 +95,9 @@ class AplicacaoOficinaPro(ctk.CTk):
         quadro_os_topo = ctk.CTkFrame(self.coluna_dir, fg_color="transparent")
         quadro_os_topo.pack(fill="x", padx=14, pady=(10, 4))
         self.lbl_os_titulo = ctk.CTkLabel(quadro_os_topo, text="NENHUMA OS ABERTA", font=ctk.CTkFont(size=16, weight="bold"), text_color=COR_TEXTO)
-        self.lbl_os_titulo.pack(side="left")
+        self.lbl_os_titulo.pack(anchor="w")
+        self.lbl_contexto_os = ctk.CTkLabel(quadro_os_topo, text="Nenhum atendimento carregado.", font=ctk.CTkFont(size=10), text_color=COR_MUTED)
+        self.lbl_contexto_os.pack(anchor="w")
 
         quadro_config_os = ctk.CTkFrame(self.coluna_dir, fg_color="#182234", corner_radius=8)
         quadro_config_os.pack(fill="x", padx=14, pady=6)
@@ -141,11 +143,11 @@ class AplicacaoOficinaPro(ctk.CTk):
         ctk.CTkButton(quadro_fechamento, text="📁 Pasta da OS", width=115, fg_color="#334155", command=self._abrir_pasta_documentos).pack(side="right", padx=6)
         ctk.CTkButton(quadro_fechamento, text="💬 WhatsApp", width=145, fg_color=COR_VERDE, command=self._disparar_whatsapp).pack(side="right", padx=6)
 
-        quadro_patio = ctk.CTkFrame(self, fg_color=COR_CARD, corner_radius=10, border_width=1, border_color=COR_BORDA, height=140)
-        quadro_patio.pack(fill="x", padx=16, pady=(4, 12)); quadro_patio.pack_propagate(False)
-        ctk.CTkLabel(quadro_patio, text="🚗 PÁTIO (2 cliques para carregar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
+        quadro_historico_os = ctk.CTkFrame(self, fg_color=COR_CARD, corner_radius=10, border_width=1, border_color=COR_BORDA, height=230)
+        quadro_historico_os.pack(fill="x", padx=16, pady=(4, 12)); quadro_historico_os.pack_propagate(False)
+        ctk.CTkLabel(quadro_historico_os, text="🗂 HISTÓRICO DE ATENDIMENTOS (2 cliques para carregar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
         cols_patio = ("num", "data", "placa", "veic", "cli", "status", "tot")
-        self.tab_patio = ttk.Treeview(quadro_patio, columns=cols_patio, show="headings", height=3)
+        self.tab_patio = ttk.Treeview(quadro_historico_os, columns=cols_patio, show="headings", height=5)
         for c, t, w in zip(cols_patio, ["OS Nº", "Data", "Placa", "Veículo", "Cliente", "Status", "Total Líquido"], [60, 85, 85, 190, 180, 95, 100]):
             self.tab_patio.heading(c, text=t); self.tab_patio.column(c, width=w, anchor="e" if c == "tot" else ("center" if c in ["num", "data", "placa", "status"] else "w"))
         self.tab_patio.pack(fill="both", expand=True, padx=12, pady=(0, 6))
@@ -198,6 +200,15 @@ class AplicacaoOficinaPro(ctk.CTk):
             if messagebox.askyesno("Não Encontrado", f"Placa {placa.upper()} não encontrada.\nDeseja iniciar o cadastro agora?"):
                 self._janela_novo_atendimento(placa_padrao=placa)
 
+    def _atualizar_contexto_os(self):
+        """Linha de contexto (Cliente | Veículo | WhatsApp) logo abaixo do título da OS."""
+        if self.os_ativa and self.veiculo_ativo and self.cliente_ativo:
+            texto = (f"Cliente: {self.cliente_ativo.nome}   |   Veículo: {self.veiculo_ativo.marca_modelo} ({self.veiculo_ativo.placa})"
+                     f"   |   WhatsApp: {self.cliente_ativo.telefone}")
+            self.lbl_contexto_os.configure(text=texto)
+        else:
+            self.lbl_contexto_os.configure(text="Nenhum atendimento carregado.")
+
     def _atualizar_ficha_veiculo(self):
         if self.veiculo_ativo and self.cliente_ativo:
             texto = (f"Veículo: {self.veiculo_ativo.marca_modelo} ({self.veiculo_ativo.ano})\n"
@@ -207,6 +218,7 @@ class AplicacaoOficinaPro(ctk.CTk):
             self.lbl_info_carro.configure(text=texto, text_color=COR_TEXTO)
         else:
             self.lbl_info_carro.configure(text="Nenhum veículo selecionado.", text_color=COR_MUTED)
+        self._atualizar_contexto_os()
 
     def _atualizar_tabela_historico(self, placa: str):
         for l in self.tab_hist.get_children(): self.tab_hist.delete(l)
@@ -215,7 +227,7 @@ class AplicacaoOficinaPro(ctk.CTk):
 
     def _janela_novo_atendimento(self, placa_padrao=""):
         janela = ctk.CTkToplevel(self)
-        janela.title("Novo Atendimento"); janela.geometry("420x320")
+        janela.title("Novo Atendimento"); janela.geometry("420x440")
         janela.configure(fg_color=COR_FUNDO); janela.grab_set()
         janela.attributes("-topmost", True); janela.lift()
         container = ctk.CTkFrame(janela, fg_color="transparent")
@@ -522,21 +534,67 @@ class AplicacaoOficinaPro(ctk.CTk):
         tabview = ctk.CTkTabview(janela); tabview.pack(fill="both", expand=True, padx=10, pady=10)
         tab_mec = tabview.add("Mecânicos"); tab_cli = tabview.add("Clientes / Veículos"); tab_est = tabview.add("Estoque de Peças"); tab_ofi = tabview.add("Oficina")
 
-        e_mec_nome = ctk.CTkEntry(tab_mec, placeholder_text="Nome", width=200); e_mec_nome.pack(pady=5)
-        e_mec_esp = ctk.CTkEntry(tab_mec, placeholder_text="Especialidade", width=200); e_mec_esp.pack(pady=5)
-        e_mec_tel = ctk.CTkEntry(tab_mec, placeholder_text="WhatsApp (DDD+numero)", width=200); e_mec_tel.pack(pady=5)
-        e_mec_taxa = ctk.CTkEntry(tab_mec, placeholder_text="Comissão (%) - ex: 20", width=200); e_mec_taxa.insert(0, "20"); e_mec_taxa.pack(pady=5)
-        def add_mec():
+        # --- MECÂNICOS: cadastro + edição (clique numa linha para carregar os dados) ---
+        e_mec_nome = ctk.CTkEntry(tab_mec, placeholder_text="Nome", width=300); e_mec_nome.pack(pady=4)
+        linha_mec = ctk.CTkFrame(tab_mec, fg_color="transparent"); linha_mec.pack(fill="x", padx=6)
+        e_mec_esp = ctk.CTkEntry(linha_mec, placeholder_text="Especialidade", width=180); e_mec_esp.pack(side="left", padx=2, pady=2)
+        e_mec_tel = ctk.CTkEntry(linha_mec, placeholder_text="WhatsApp (DDD+numero)", width=160); e_mec_tel.pack(side="left", padx=2, pady=2)
+        e_mec_taxa = ctk.CTkEntry(linha_mec, placeholder_text="Comissão % (vazio = 20)", width=160); e_mec_taxa.pack(side="left", padx=2, pady=2)
+        cols_mec = ("id", "nome", "esp", "taxa")
+        tree_mec = ttk.Treeview(tab_mec, columns=cols_mec, show="headings")
+        for c, t, w, a in zip(cols_mec, ["Nº", "Mecânico", "Especialidade", "Comissão"], [40, 190, 190, 90], ["center", "w", "w", "center"]):
+            tree_mec.heading(c, text=t); tree_mec.column(c, width=w, anchor=a)
+        tree_mec.pack(fill="both", expand=True, padx=6, pady=4)
+
+        def recarregar_mecanicos():
+            for l in tree_mec.get_children(): tree_mec.delete(l)
+            for m in self.repo.listar_mecanicos():
+                tree_mec.insert("", "end", values=(m.id, m.nome, m.especialidade, f"{m.taxa_comissao*100:.0f}%"))
+
+        def selecionar_mec(event):
+            sel = tree_mec.selection()
+            if not sel: return
+            id_mec = int(tree_mec.item(sel[0], "values")[0])
+            m = next((x for x in self.repo.listar_mecanicos() if x.id == id_mec), None)
+            if not m: return
+            for ent, valor in [(e_mec_nome, m.nome), (e_mec_esp, m.especialidade), (e_mec_tel, m.telefone), (e_mec_taxa, f"{m.taxa_comissao*100:.0f}")]:
+                ent.delete(0, "end"); ent.insert(0, valor)
+        tree_mec.bind("<<TreeviewSelect>>", selecionar_mec)
+
+        def ler_taxa_mec() -> float:
+            taxa_s = e_mec_taxa.get().strip()
+            return (float(taxa_s.replace(",", ".")) if taxa_s else 20.0) / 100
+
+        def salvar_alteracoes_mec():
+            sel = tree_mec.selection()
+            if not sel:
+                messagebox.showwarning("Aviso", "Selecione um mecânico na lista para editar."); return
+            id_mec = int(tree_mec.item(sel[0], "values")[0])
             try:
-                taxa = float(e_mec_taxa.get().replace(",", ".")) / 100
+                taxa = ler_taxa_mec()
             except ValueError:
                 messagebox.showerror("Erro", "Comissão inválida: digite o percentual (ex: 20 para 20%)."); return
             try:
-                self.repo.salvar_mecanico(Mecanico(e_mec_nome.get(), e_mec_tel.get(), e_mec_esp.get(), taxa)); self._atualizar_combo_mecanicos(); messagebox.showinfo("Sucesso", "Mecânico cadastrado!")
+                editado = Mecanico(e_mec_nome.get(), e_mec_tel.get(), e_mec_esp.get(), taxa, id_mec)
+                self.repo.atualizar_mecanico(id_mec, editado)
+                recarregar_mecanicos(); self._atualizar_combo_mecanicos()
+                messagebox.showinfo("Sucesso", "Dados do mecânico atualizados!")
+            except ValueError as e:
+                messagebox.showerror("Erro de Cadastro", str(e))
+
+        def add_mec():
+            try: taxa = ler_taxa_mec()
+            except ValueError:
+                messagebox.showerror("Erro", "Comissão inválida: digite o percentual (ex: 20 para 20%)."); return
+            try:
+                self.repo.salvar_mecanico(Mecanico(e_mec_nome.get(), e_mec_tel.get(), e_mec_esp.get(), taxa)); self._atualizar_combo_mecanicos(); recarregar_mecanicos(); messagebox.showinfo("Sucesso", "Mecânico cadastrado!")
             except ValueError as e:
                 messagebox.showerror("Erro de Cadastro", str(e))
             except Exception as e: messagebox.showerror("Erro", str(e))
-        ctk.CTkButton(tab_mec, text="Adicionar Mecânico", command=add_mec).pack(pady=10)
+        quadro_botoes_mec = ctk.CTkFrame(tab_mec, fg_color="transparent"); quadro_botoes_mec.pack(pady=6)
+        ctk.CTkButton(quadro_botoes_mec, text="Adicionar", width=140, command=add_mec).pack(side="left", padx=6)
+        ctk.CTkButton(quadro_botoes_mec, text="Salvar Alterações do Selecionado", width=230, fg_color=COR_LARANJA, hover_color=COR_LARANJA_HOV, command=salvar_alteracoes_mec).pack(side="left", padx=6)
+        recarregar_mecanicos()
 
         def atualizar_lista_cli():
             for l in tree_cli.get_children(): tree_cli.delete(l)
@@ -546,34 +604,67 @@ class AplicacaoOficinaPro(ctk.CTk):
         tree_cli = ttk.Treeview(tab_cli, columns=("placa", "mod", "dono"), show="headings"); tree_cli.heading("placa", text="Placa"); tree_cli.heading("mod", text="Modelo"); tree_cli.heading("dono", text="Dono")
         tree_cli.pack(fill="both", expand=True, pady=5); ctk.CTkButton(tab_cli, text="Atualizar Lista", command=atualizar_lista_cli).pack(); atualizar_lista_cli()
 
-        e_est_nome = ctk.CTkEntry(tab_est, placeholder_text="Nome da Peça", width=200); e_est_nome.pack(pady=5)
-        e_est_qtd = ctk.CTkEntry(tab_est, placeholder_text="Quantidade", width=200); e_est_qtd.pack(pady=5)
-        e_est_custo = ctk.CTkEntry(tab_est, placeholder_text="Preço de Custo (R$)", width=200); e_est_custo.pack(pady=5)
-        e_est_margem = ctk.CTkEntry(tab_est, placeholder_text="Margem de Lucro (%)", width=200); e_est_margem.insert(0, "50"); e_est_margem.pack(pady=5)
-        
-        def add_estoque():
-            if not e_est_nome.get().strip():
-                messagebox.showerror("Erro", "Informe o nome da peça."); return
-            try:
-                custo = float(e_est_custo.get().replace(",", ".")); margem = float(e_est_margem.get().replace(",", "."))
-                qtd = int(e_est_qtd.get())
-                criou_nova = self.repo.salvar_peca_estoque(e_est_nome.get(), qtd, custo, margem)
-                preco_venda = custo * (1 + margem/100)
-                msg_extra = "\n(Já existia: quantidade somada ao saldo atual)" if not criou_nova else ""
-                messagebox.showinfo("Sucesso", f"{'Peça cadastrada' if criou_nova else 'Estoque reposto'}!\nPreço de Venda sugerido: R$ {preco_venda:.2f}{msg_extra}")
-                self._atualizar_campo_descricao(); atualizar_lista_est()
-            except ValueError: messagebox.showerror("Erro", "Preencha os valores corretamente.")
-        
+        # --- ESTOQUE: cadastro/reposição + edição (clique numa linha para carregar os dados) ---
+        e_est_nome = ctk.CTkEntry(tab_est, placeholder_text="Nome da Peça", width=300); e_est_nome.pack(pady=4)
+        linha_est = ctk.CTkFrame(tab_est, fg_color="transparent"); linha_est.pack(fill="x", padx=6)
+        e_est_qtd = ctk.CTkEntry(linha_est, placeholder_text="Qtd", width=70); e_est_qtd.pack(side="left", padx=2, pady=2)
+        e_est_custo = ctk.CTkEntry(linha_est, placeholder_text="Preço de Custo (R$)", width=150); e_est_custo.pack(side="left", padx=2, pady=2)
+        e_est_margem = ctk.CTkEntry(linha_est, placeholder_text="Margem % (vazio = 50)", width=150); e_est_margem.pack(side="left", padx=2, pady=2)
+
         def atualizar_lista_est():
             for l in tree_est.get_children(): tree_est.delete(l)
             for p in self.repo.listar_estoque():
                 preco_venda = p["preco_custo"] * (1 + p["margem_lucro"]/100)
                 tree_est.insert("", "end", values=(p["nome"], p["quantidade"], f"R$ {p['preco_custo']:.2f}", f"{p['margem_lucro']:.0f}%", f"R$ {preco_venda:.2f}"))
-                
-        ctk.CTkButton(tab_est, text="Adicionar ao Estoque", command=add_estoque).pack(pady=10)
-        tree_est = ttk.Treeview(tab_est, columns=("nome", "qtd", "custo", "margem", "venda"), show="headings", height=5)
-        tree_est.heading("nome", text="Peça"); tree_est.heading("qtd", text="Qtd"); tree_est.heading("custo", text="Custo"); tree_est.heading("margem", text="Margem"); tree_est.heading("venda", text="Preço Venda")
-        tree_est.pack(fill="both", expand=True, pady=5); ctk.CTkButton(tab_est, text="Atualizar Estoque", command=atualizar_lista_est).pack(); atualizar_lista_est()
+
+        def selecionar_est(event):
+            sel = tree_est.selection()
+            if not sel: return
+            nome_selecionado = tree_est.item(sel[0], "values")[0]
+            d = self.repo.obter_dados_peca(nome_selecionado)
+            if not d: return
+            for ent, valor in [(e_est_nome, d["nome"]), (e_est_qtd, str(int(d["quantidade"]))), (e_est_custo, f"{d['preco_custo']:.2f}"), (e_est_margem, f"{d['margem_lucro']:.0f}")]:
+                ent.delete(0, "end"); ent.insert(0, valor)
+
+        def ler_dados_est():
+            """Retorna (nome, qtd, custo, margem); margem vazia assume o padrão 50%."""
+            margem_s = e_est_margem.get().strip()
+            margem = float(margem_s.replace(",", ".")) if margem_s else 50.0
+            return e_est_nome.get().strip(), int(e_est_qtd.get()), float(e_est_custo.get().replace(",", ".")), margem
+
+        def add_estoque():
+            try:
+                nome, qtd, custo, margem = ler_dados_est()
+                criou_nova = self.repo.salvar_peca_estoque(nome, qtd, custo, margem)
+                preco_venda = custo * (1 + margem/100)
+                msg_extra = "\n(Já existia: quantidade somada ao saldo atual)" if not criou_nova else ""
+                messagebox.showinfo("Sucesso", f"{'Peça cadastrada' if criou_nova else 'Estoque reposto'}!\nPreço de Venda sugerido: R$ {preco_venda:.2f}{msg_extra}")
+                self._atualizar_campo_descricao(); atualizar_lista_est()
+            except ValueError: messagebox.showerror("Erro", "Preencha os valores corretamente.")
+
+        def atualizar_item_estoque():
+            sel = tree_est.selection()
+            if not sel:
+                messagebox.showwarning("Aviso", "Selecione uma peça na lista para atualizar."); return
+            try:
+                nome, qtd, custo, margem = ler_dados_est()
+                if not nome: messagebox.showerror("Erro", "Informe o nome da peça."); return
+                self.repo.atualizar_peca_estoque(nome, qtd, custo, margem)
+                preco_venda = custo * (1 + margem/100)
+                messagebox.showinfo("Sucesso", f"'{nome}' atualizado!\nPreço de Venda: R$ {preco_venda:.2f}")
+                self._atualizar_campo_descricao(); atualizar_lista_est()
+            except ValueError: messagebox.showerror("Erro", "Preencha os valores corretamente.")
+
+        quadro_botoes_est = ctk.CTkFrame(tab_est, fg_color="transparent"); quadro_botoes_est.pack(pady=6)
+        ctk.CTkButton(quadro_botoes_est, text="Adicionar / Repor", width=150, command=add_estoque).pack(side="left", padx=6)
+        ctk.CTkButton(quadro_botoes_est, text="Atualizar Item Selecionado", width=200, fg_color=COR_LARANJA, hover_color=COR_LARANJA_HOV, command=atualizar_item_estoque).pack(side="left", padx=6)
+        tree_est = ttk.Treeview(tab_est, columns=("nome", "qtd", "custo", "margem", "venda"), show="headings")
+        for c, t, w, a in zip(("nome", "qtd", "custo", "margem", "venda"), ["Peça", "Qtd", "Custo", "Margem", "Preço Venda"], [170, 50, 90, 70, 110], ["w", "center", "e", "center", "e"]):
+            tree_est.heading(c, text=t); tree_est.column(c, width=w, anchor=a)
+        tree_est.pack(fill="both", expand=True, padx=6, pady=4)
+        ctk.CTkButton(tab_est, text="Atualizar Lista", width=120, command=atualizar_lista_est).pack(pady=4)
+        atualizar_lista_est()
+        tree_est.bind("<<TreeviewSelect>>", selecionar_est)  # só após a criação da árvore
 
         # --- ABA OFICINA (configurações usadas no PDF) ---
         ctk.CTkLabel(tab_ofi, text="Dados da Oficina (aparecem nos orçamentos PDF)", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_LARANJA).pack(pady=(10, 6))

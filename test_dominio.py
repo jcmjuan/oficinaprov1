@@ -188,6 +188,20 @@ class TestPersistenciaEstoque(unittest.TestCase):
             valor = conn.cursor().execute("SELECT valor FROM financeiro WHERE numero_os = ?", (os_obj.numero_os,)).fetchone()["valor"]
             self.assertAlmostEqual(valor, 0.00)
 
+    def test_atualizar_mecanico_e_peca_estoque(self):
+        """Edição direta (não upsert) de mecânico e peça, novos na tela de Gerenciar."""
+        mec = self.repo.listar_mecanicos()[0]
+        self.repo.atualizar_mecanico(mec.id, Mecanico("Nome Novo", "51999991111", "Nova Especialidade", 0.31))
+        editado = next(x for x in self.repo.listar_mecanicos() if x.id == mec.id)
+        self.assertEqual(editado.nome, "Nome Novo")
+        self.assertAlmostEqual(editado.taxa_comissao, 0.31)
+
+        self.repo.salvar_peca_estoque("Filtro de Ar", 5, 22.00, 80.0)
+        self.repo.atualizar_peca_estoque("Filtro de Ar", 7, 25.00, 60.0)  # edição absoluta
+        d = self.repo.obter_dados_peca("Filtro de Ar")
+        self.assertEqual(int(d["quantidade"]), 7)        # substituiu, não somou
+        self.assertEqual(d["preco_custo"], 25.00)
+
     def test_relatorio_comissoes(self):
         os_obj = self._nova_os()
         os_obj.adicionar_item(MaoDeObra("Troca de Óleo", 2.0, 100.00, self.mecanico))
