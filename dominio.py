@@ -8,16 +8,20 @@ import urllib.parse
 
 class Pessoa(ABC):
     def __init__(self, nome: str, telefone: str):
-        self._nome = nome
-        self._telefone = ""
-        if self.__validar_telefone(telefone):
-            self._telefone = telefone
-        else:
-            self._telefone = telefone 
+        if not nome.strip():
+            raise ValueError("Nome não pode ser vazio.")
+        self._nome = nome.strip()
+        if not self.__validar_telefone(telefone):
+            raise ValueError("Telefone inválido. Informe DDD + número (10 ou 11 dígitos).")
+        self._telefone = telefone.strip()
 
     def __validar_telefone(self, telefone: str) -> bool:
         digitos = "".join(filter(str.isdigit, telefone))
         return len(digitos) in (10, 11)
+
+    def telefone_digitos(self) -> str:
+        """Retorna o telefone apenas com dígitos (para URLs / wa.me)."""
+        return "".join(filter(str.isdigit, self._telefone))
 
     @property
     def nome(self) -> str:
@@ -138,14 +142,16 @@ class Peca(ItemOS):
         return self._quantidade * self._valor_unitario
 
 class MaoDeObra(ItemOS):
-    def __init__(self, descricao: str, horas: float, valor_hora: float, mecanico: Mecanico):
+    def __init__(self, descricao: str, horas: float, valor_hora: float, mecanico: Optional[Mecanico] = None):
         super().__init__(descricao, horas, valor_hora)
-        self.mecanico_responsavel: Mecanico = mecanico
+        self.mecanico_responsavel: Optional[Mecanico] = mecanico
 
     def calcular_subtotal(self) -> float:
         return self._quantidade * self._valor_unitario
 
     def obter_comissao_item(self) -> float:
+        if not self.mecanico_responsavel:
+            return 0.0
         return self.mecanico_responsavel.calcular_comissao(self.calcular_subtotal())
 
 class OrdemServico:
@@ -163,14 +169,23 @@ class OrdemServico:
     def desconto(self) -> float:
         return self.__desconto
 
-    def adicionar_item(self, item: ItemOS) -> None:
-        self.itens.append(item)
-
     def aplicar_desconto(self, valor: float) -> bool:
         if 0 <= valor <= self.calcular_total_bruto():
             self.__desconto = valor
             return True
         return False
+
+    def definir_desconto_salvo(self, valor: float) -> None:
+        """Restaura um desconto já persistido no banco, sem revalidação contra o total bruto."""
+        self.__desconto = max(0.0, valor)
+
+    def adicionar_item(self, item: ItemOS) -> None:
+        self.itens.append(item)
+
+    def remover_item(self, indice: int) -> Optional[ItemOS]:
+        if 0 <= indice < len(self.itens):
+            return self.itens.pop(indice)
+        return None
 
     def calcular_total_bruto(self) -> float:
         return sum(item.calcular_subtotal() for item in self.itens)
@@ -180,6 +195,10 @@ class OrdemServico:
 
     def gerar_link_whatsapp(self) -> str:
         tipo_doc = "ORÇAMENTO" if self.status == "Orçamento" else "ORDEM DE SERVIÇO"
+        # Normaliza o telefone: só dígitos; assume DDI 55 se não estiver presente
+        tel = self.cliente.telefone_digitos()
+        if not (tel.startswith("55") and len(tel) in (12, 13)):
+            tel = "55" + tel
         mecanico_txt = f"\n*Responsável Técnico:* {self.mecanico_principal.nome}" if self.mecanico_principal else ""
         
         itens_txt = ""
@@ -203,4 +222,4 @@ class OrdemServico:
             f"Poderia nos confirmar a aprovação deste atendimento?"
         )
         msg_cod = urllib.parse.quote(msg)
-        return f"https://wa.me/55{self.cliente.telefone}?text={msg_cod}"
+        return f"https://wa.me/{tel}?text={msg_cod}"

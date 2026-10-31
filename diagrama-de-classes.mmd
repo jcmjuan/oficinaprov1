@@ -1,0 +1,186 @@
+---
+DIAGRAMA DE CLASSES - OficinaPro v1.0 (corrigido)
+---
+Como visualizar: cole o conteúdo deste arquivo no Mermaid Live Editor (https://mermaid.live/)
+e exporte como PNG para substituir o diagrama-de-classes.png na documentação.
+
+O que foi corrigido em relação à versão anterior:
+1. __validar_telefone agora aparece com visibilidade PRIVADA (-), como no código.
+2. Multiplicidade OrdemServico-ItemOS alterada para 0..* (o código aceita OS sem itens).
+3. Inclusos os atributos que materializam as associações em OrdemServico
+   (itens, veiculo, cliente, mecanico_principal) - associação = atributo do tipo da outra classe.
+4. Inclusos getters/properties (placa, quilometragem, cpf_cnpj, custo_aquisicao, desconto...)
+   e os métodos privados __formatar_placa e __str__ (nomenclatura igual ao Python).
+5. MaoDeObra -> Mecanico agora é 0..1 (o construtor aceita mecânico não atribuído).
+6. Novos membros introduzidos nesta versão do código: remover_item(), definir_desconto_salvo(),
+   telefone_digitos() e a configuração da oficina (tabela config).
+
+===============================================================
+DIAGRAMA 1 - CAMADA DE DOMÍNIO (regras de negócio / POO)
+===============================================================
+```mermaid
+classDiagram
+    direction TB
+
+    class Pessoa {
+        <<Abstract>>
+        -_nome : string
+        -_telefone : string
+        -__validar_telefone(telefone) : bool
+        +telefone_digitos() : string
+        +obter_resumo() : string*
+    }
+
+    class Cliente {
+        -__cpf_cnpj : string
+        +id : int
+        +veiculos : List~Veiculo~
+        +cpf_cnpj() : string
+        +adicionar_veiculo(veiculo) void
+        +obter_resumo() : string
+    }
+
+    class Mecanico {
+        -__especialidade : string
+        -__taxa_comissao : float
+        +id : int
+        +especialidade() : string
+        +taxa_comissao() : float
+        +calcular_comissao(valor) : float
+        +obter_resumo() : string
+    }
+
+    class Veiculo {
+        -__placa : string
+        -__quilometragem : int
+        +id : int
+        +cliente_id : int
+        +marca_modelo : string
+        +ano : int
+        -__formatar_placa(placa) : string
+        +placa() : string
+        +quilometragem() : int
+        +atualizar_km(nova_km) : bool
+        +__str__() : string
+    }
+
+    class ItemOS {
+        <<Abstract>>
+        -_descricao : string
+        -_quantidade : float
+        -_valor_unitario : float
+        +descricao() : string
+        +quantidade() : float
+        +valor_unitario() : float
+        +calcular_subtotal() : float*
+    }
+
+    class Peca {
+        -__custo_aquisicao : float
+        +codigo_sku : string
+        +custo_aquisicao() : float
+        +calcular_subtotal() : float
+    }
+
+    class MaoDeObra {
+        +mecanico_responsavel : Mecanico
+        +calcular_subtotal() : float
+        +obter_comissao_item() : float
+    }
+
+    class OrdemServico {
+        -__desconto : float
+        +numero_os : int
+        +data_abertura : string
+        +status : string
+        +itens : List~ItemOS~
+        +veiculo : Veiculo
+        +cliente : Cliente
+        +mecanico_principal : Mecanico
+        +desconto() : float
+        +adicionar_item(item) void
+        +remover_item(indice) : ItemOS
+        +aplicar_desconto(valor) : bool
+        +definir_desconto_salvo(valor) void
+        +calcular_total_bruto() : float
+        +calcular_total_liquido() : float
+        +gerar_link_whatsapp() : string
+    }
+
+    Pessoa <|-- Cliente : herda
+    Pessoa <|-- Mecanico : herda
+    ItemOS <|-- Peca : herda
+    ItemOS <|-- MaoDeObra : herda
+
+    OrdemServico "1" o-- "0..*" ItemOS : contém
+    OrdemServico "1" --> "1" Veiculo : refere-se
+    OrdemServico "1" --> "1" Cliente : pertence
+    OrdemServico "1" --> "0..1" Mecanico : designado
+    Cliente "1" --> "0..*" Veiculo : possui
+    MaoDeObra "0..1" --> "0..1" Mecanico : executado por
+```
+
+===============================================================
+DIAGRAMA 2 - CAMADA DE APLICAÇÃO/PERSISTÊNCIA (infraestrutura)
+===============================================================
+```mermaid
+classDiagram
+    direction LR
+
+    class AplicacaoOficinaPro {
+        <<CustomTkinter GUI>>
+        -db : GerenciadorBanco
+        -repo : RepositorioOficina
+        -emissor_pdf : EmissorPDF
+        -cliente_ativo : Cliente
+        -veiculo_ativo : Veiculo
+        -os_ativa : OrdemServico
+        +_buscar_veiculo() void
+        +_salvar_estado_os() void
+        +_adicionar_item_memoria() void
+        +_remover_item_os() void
+        +_aplicar_desconto() void
+        +_emitir_pdf() void
+        +_janela_financeiro() void
+        +_janela_comissoes() void
+        +_janela_gerenciamento() void
+        +_pedir_km_final() void
+    }
+
+    class RepositorioOficina {
+        -db : GerenciadorBanco
+        +salvar_cliente(cliente) : int
+        +salvar_mecanico(mecanico) : int
+        +salvar_veiculo(veiculo) : int
+        +criar_ordem_servico(os) : int
+        +carregar_ordem_completa(numero_os) : OrdemServico
+        +salvar_itens_e_fechamento_os(os) void
+        +salvar_peca_estoque(nome, qtd, custo, margem) : bool
+        +relatorio_comissoes(dias) : List~dict~
+        +atualizar_km_veiculo(id_veiculo, nova_km) void
+        +resumo_financeiro() : dict
+        +obter_config(chave) : string
+        +salvar_config(chave, valor) void
+    }
+
+    class GerenciadorBanco {
+        -__caminho_db : string
+        -__inicializar_tabelas() void
+        +sessao() : ContextManager
+        +obter_conexao() : sqlite.Connection
+    }
+
+    class EmissorPDF {
+        +pasta_saida : string
+        +gerar_pdf_ordem_servico(os, dados_oficina) : string
+    }
+
+    AplicacaoOficinaPro "1" --> "1" RepositorioOficina : usa
+    AplicacaoOficinaPro "1" --> "1" EmissorPDF : gera documentos
+    AplicacaoOficinaPro "1" --> "*" OrdemServico : carrega/edita
+    AplicacaoOficinaPro "1" --> "*" Cliente : cria
+    AplicacaoOficinaPro "1" --> "*" Veiculo : cria
+    RepositorioOficina "1" --> "1" GerenciadorBanco : persiste
+    RepositorioOficina "*" --> "*" OrdemServico : salva/recupera
+    EmissorPDF "1" --> "1" OrdemServico : recebe como parâmetro
+```

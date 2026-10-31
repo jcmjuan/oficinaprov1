@@ -67,6 +67,7 @@ class AplicacaoOficinaPro(ctk.CTk):
         ctk.CTkButton(quadro_topo, text="Buscar", width=80, fg_color=COR_LARANJA, command=self._buscar_veiculo).pack(side="left", padx=6)
 
         ctk.CTkButton(quadro_topo, text="+ Novo Atendimento", fg_color=COR_VERDE, hover_color=COR_VERDE_HOV, width=160, command=self._janela_novo_atendimento).pack(side="right", padx=16, pady=10)
+        ctk.CTkButton(quadro_topo, text="💰 Comissões", fg_color="#334155", hover_color="#475569", width=115, command=self._janela_comissoes).pack(side="right", padx=10)
         ctk.CTkButton(quadro_topo, text="📊 Financeiro", fg_color="#334155", hover_color="#475569", width=120, command=self._janela_financeiro).pack(side="right", padx=10)
         ctk.CTkButton(quadro_topo, text="⚙️ Gerenciar", fg_color="#334155", hover_color="#475569", width=110, command=self._janela_gerenciamento).pack(side="right", padx=10)
 
@@ -130,12 +131,14 @@ class AplicacaoOficinaPro(ctk.CTk):
 
         quadro_fechamento = ctk.CTkFrame(self.coluna_dir, fg_color="transparent")
         quadro_fechamento.pack(fill="x", padx=14, pady=(6, 12))
+        ctk.CTkButton(quadro_fechamento, text="− Remover Item", width=115, fg_color="#EF4444", hover_color="#DC2626", command=self._remover_item_os).pack(side="left", padx=4)
         ctk.CTkLabel(quadro_fechamento, text="Desconto (R$):").pack(side="left", padx=4)
         self.ent_desconto = ctk.CTkEntry(quadro_fechamento, width=80); self.ent_desconto.insert(0, "0.00"); self.ent_desconto.pack(side="left", padx=4)
         ctk.CTkButton(quadro_fechamento, text="Aplicar", width=70, fg_color="#334155", command=self._aplicar_desconto).pack(side="left", padx=4)
         self.lbl_total_os = ctk.CTkLabel(quadro_fechamento, text="TOTAL: R$ 0,00", font=ctk.CTkFont(size=16, weight="bold"), text_color=COR_VERDE)
         self.lbl_total_os.pack(side="left", padx=16)
         ctk.CTkButton(quadro_fechamento, text="📄 Gerar PDF", width=115, fg_color="#334155", command=self._emitir_pdf).pack(side="right", padx=6)
+        ctk.CTkButton(quadro_fechamento, text="📁 Pasta da OS", width=115, fg_color="#334155", command=self._abrir_pasta_documentos).pack(side="right", padx=6)
         ctk.CTkButton(quadro_fechamento, text="💬 WhatsApp", width=145, fg_color=COR_VERDE, command=self._disparar_whatsapp).pack(side="right", padx=6)
 
         quadro_patio = ctk.CTkFrame(self, fg_color=COR_CARD, corner_radius=10, border_width=1, border_color=COR_BORDA, height=140)
@@ -256,7 +259,9 @@ class AplicacaoOficinaPro(ctk.CTk):
                     carro = Veiculo(e_placa.get().strip(), e_mod.get().strip(), int(e_ano.get() or 2000), int(e_km.get() or 0), cliente_id=cli_id)
                     self.repo.salvar_veiculo(carro)
                     self.veiculo_ativo = self.repo.obter_veiculo_por_placa(carro.placa)
-                    self.cliente_ativo = cli
+                    # Recarrega o cliente do banco para garantir o id persistido
+                    # (antes ficava None e o salvamento da OS estourava NOT NULL)
+                    self.cliente_ativo = self.repo.obter_cliente_por_id(cli_id)
                     self._atualizar_ficha_veiculo(); self._atualizar_tabela_historico(self.veiculo_ativo.placa)
                     self._preparar_nova_os_memoria(); janela.destroy()
                     messagebox.showinfo("Sucesso", "Cadastro concluído! Orçamento pronto.")
@@ -274,16 +279,32 @@ class AplicacaoOficinaPro(ctk.CTk):
         self.lbl_os_titulo.configure(text=f"NOVO ORÇAMENTO - [{self.veiculo_ativo.placa}]")
         self._recarregar_tabela_itens_os()
 
+    def _os_finalizada_imutavel(self) -> bool:
+        """OS Finalizada é documento financeiro: só volta a ser editável reabrindo o status e salvando."""
+        if self.os_ativa and self.os_ativa.status == "Finalizado":
+            messagebox.showerror(
+                "OS Finalizada",
+                "Uma OS finalizada é um documento financeiro imutável.\n"
+                "Mude o status para outro valor e clique em 'Salvar Estado' para voltar a editá-la.")
+            return True
+        return False
+
     def _adicionar_item_memoria(self):
         if not self.os_ativa or not self.veiculo_ativo: messagebox.showwarning("Aviso", "Inicie um atendimento primeiro."); return
+        if self._os_finalizada_imutavel(): return
         desc = self.ent_item_desc.get().strip(); qtd_s = self.ent_item_qtd.get().strip(); val_s = self.ent_item_valor.get().strip()
         if not desc or not qtd_s or not val_s: messagebox.showwarning("Aviso", "Preencha todos os campos do item."); return
 
         try:
             qtd = float(qtd_s.replace(",", ".")); val = float(val_s.replace(",", "."))
             if self.var_tipo_item.get() == "PECA":
-                if not self.repo.dar_baixa_estoque(desc, int(qtd)):
-                    messagebox.showerror("Estoque Insuficiente", f"Não há {int(qtd)} unidades de '{desc}' no estoque."); return
+                # A baixa no estoque acontece ao SALVAR a OS (transacional). Aqui validamos
+                # a disponibilidade apenas para dar feedback imediato ao usuário.
+                dados = self.repo.obter_dados_peca(desc)
+                disponivel = int(dados["quantidade"]) if dados else 0
+                if int(qtd) > disponivel:
+                    messagebox.showerror("Estoque Insuficiente", f"Disponível: {disponivel} unidade(s) de '{desc}'.")
+                    return
                 item = Peca(descricao=desc, quantidade=qtd, valor_unitario=val)
             else:
                 item = MaoDeObra(descricao=desc, horas=qtd, valor_hora=val, mecanico=self.os_ativa.mecanico_principal)
@@ -307,18 +328,59 @@ class AplicacaoOficinaPro(ctk.CTk):
         self.os_ativa.status = self.cb_status.get()
         try: self.os_ativa.mecanico_principal = self.repo.obter_mecanico_por_id(int(self.cb_mecanicos.get().split(" - ")[0]))
         except Exception: pass
-        if self.os_ativa.numero_os == 0: self.os_ativa.numero_os = self.repo.criar_ordem_servico(self.os_ativa)
-        self.repo.salvar_itens_e_fechamento_os(self.os_ativa)
+        if self.os_ativa.numero_os == 0:
+            try:
+                self.os_ativa.numero_os = self.repo.criar_ordem_servico(self.os_ativa)
+            except ValueError as e:
+                messagebox.showerror("Erro ao Salvar", f"A OS não foi criada.\n{e}")
+                return
+        try:
+            self.repo.salvar_itens_e_fechamento_os(self.os_ativa)
+        except ValueError as e:
+            messagebox.showerror("Estoque Insuficiente", f"A OS não foi salva.\n{e}\n\nDica: remova ou reduza a quantidade de peças acima do saldo disponível.")
+            return
         self.lbl_os_titulo.configure(text=f"OS #{self.os_ativa.numero_os:04d} - [{self.os_ativa.veiculo.placa}]")
-        self._recarregar_patio(); messagebox.showinfo("Sucesso", "OS salva no sistema!")
+        self._recarregar_patio()
+        messagebox.showinfo("Sucesso", "OS salva no sistema!")
+        if self.os_ativa.status == "Finalizado":
+            self._pedir_km_final()
+
+    def _pedir_km_final(self):
+        """Ao finalizar a OS, oferece a atualização da quilometragem do veículo (usa o método do domínio)."""
+        if not self.veiculo_ativo: return
+        dlg = ctk.CTkInputDialog(
+            title="Atualizar Quilometragem",
+            text=f"OS finalizada!\n\nVeículo: {self.veiculo_ativo.marca_modelo} ({self.veiculo_ativo.placa})\nKM registrada: {self.veiculo_ativo.quilometragem:,} km\n\nDigite a KM atual do veículo (vazio para não alterar):")
+        entrada = (dlg.get_input() or "").strip()
+        if not entrada: return
+        try:
+            nova_km = int(entrada.replace(".", "").replace(",", ""))
+            if self.veiculo_ativo.atualizar_km(nova_km):
+                self.repo.atualizar_km_veiculo(self.veiculo_ativo.id, nova_km)
+                self._atualizar_ficha_veiculo()
+                messagebox.showinfo("Sucesso", f"KM atualizada para {nova_km:,} km.")
+            else:
+                messagebox.showwarning("Aviso", "A KM informada é menor que a registrada. Nada foi alterado.")
+        except ValueError:
+            messagebox.showwarning("Aviso", "KM inválida. A quilometragem foi mantida.")
 
     def _aplicar_desconto(self):
         if not self.os_ativa: return
+        if self._os_finalizada_imutavel(): return
         try:
-            if self.os_ativa.aplicar_desconto(float(self.ent_desconto.get().replace(",", "."))):
-                self._recarregar_tabela_itens_os()
-                if self.os_ativa.numero_os > 0: self.repo.salvar_itens_e_fechamento_os(self.os_ativa); self._recarregar_patio()
-        except Exception: pass
+            valor = float(self.ent_desconto.get().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Erro", "Desconto inválido: digite um número (ex: 25.50).")
+            return
+        if not self.os_ativa.aplicar_desconto(valor):
+            messagebox.showwarning("Desconto inválido", "O desconto não pode ser negativo nem maior que o total bruto da OS.")
+            return
+        self._recarregar_tabela_itens_os()
+        if self.os_ativa.numero_os > 0:
+            try:
+                self.repo.salvar_itens_e_fechamento_os(self.os_ativa); self._recarregar_patio()
+            except ValueError as e:
+                messagebox.showerror("Erro", f"Não foi possível salvar: {e}")
 
     def _abrir_os_pelo_numero(self, numero_os: int):
         self.os_ativa = self.repo.carregar_ordem_completa(numero_os)
@@ -339,14 +401,48 @@ class AplicacaoOficinaPro(ctk.CTk):
         for r in self.repo.listar_ordens_painel():
             self.tab_patio.insert("", "end", values=(f"#{r['numero_os']:04d}", r["data"], r["placa"], r["veiculo"], r["cliente"], r["status"], f"R$ {r['total_liquido']:.2f}"))
 
+    def _remover_item_os(self):
+        if not self.os_ativa: return
+        if self._os_finalizada_imutavel(): return
+        sel = self.tab_itens_os.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecione um item na tabela para remover."); return
+        indice = self.tab_itens_os.index(sel[0])
+        removido = self.os_ativa.remover_item(indice)
+        if removido:
+            self._recarregar_tabela_itens_os()
+            if self.os_ativa.numero_os > 0:
+                try: self.repo.salvar_itens_e_fechamento_os(self.os_ativa)
+                except ValueError as e: messagebox.showerror("Erro", f"Erro ao devolver item ao estoque: {e}")
+                self._recarregar_patio()
+
     def _emitir_pdf(self):
         if not self.os_ativa or self.os_ativa.numero_os == 0: messagebox.showwarning("Aviso", "Salve a OS antes de gerar o PDF."); return
         try:
-            caminho = self.emissor_pdf.gerar_pdf_ordem_servico(self.os_ativa)
+            conf = {
+                "nome": self.repo.obter_config("oficina_nome"),
+                "cnpj": self.repo.obter_config("oficina_cnpj"),
+                "whatsapp": self.repo.obter_config("oficina_whatsapp"),
+                "endereco": self.repo.obter_config("oficina_endereco"),
+            }
+            dados = conf if any(str(v).strip() for v in conf.values()) else None
+            caminho = self.emissor_pdf.gerar_pdf_ordem_servico(self.os_ativa, dados)
             if platform.system() == 'Windows': os.startfile(caminho)
             elif platform.system() == 'Darwin': os.system(f'open "{caminho}"')
             else: os.system(f'xdg-open "{caminho}"')
         except Exception as e: messagebox.showerror("Erro", f"Erro ao gerar PDF: {e}")
+
+    def _abrir_pasta_documentos(self):
+        """Abre no explorador a pasta de documentos versionados da OS atual."""
+        if not self.os_ativa or self.os_ativa.numero_os == 0:
+            messagebox.showwarning("Aviso", "Salve a OS antes de acessar seus documentos."); return
+        pasta = os.path.join(self.emissor_pdf.pasta_saida, EmissorPDF.nome_pasta_os(self.os_ativa.numero_os, self.os_ativa.veiculo.placa))
+        if not os.path.isdir(pasta) or not os.listdir(pasta):
+            messagebox.showinfo("Sem Documentos", "Esta OS ainda não tem PDFs gerados.\nClique em 'Gerar PDF' primeiro.")
+            return
+        if platform.system() == "Windows": os.startfile(pasta)
+        elif platform.system() == "Darwin": os.system(f'open "{pasta}"')
+        else: os.system(f'xdg-open "{pasta}"')
 
     def _disparar_whatsapp(self):
         if self.os_ativa: webbrowser.open(self.os_ativa.gerar_link_whatsapp())
@@ -357,6 +453,22 @@ class AplicacaoOficinaPro(ctk.CTk):
         janela.title("Painel Financeiro"); janela.geometry("900x550"); janela.configure(fg_color=COR_FUNDO)
         janela.attributes("-topmost", True); janela.lift(); janela.focus_force(); janela.grab_set()
         ctk.CTkLabel(janela, text="Fluxo de Caixa (Entradas vs Saídas)", font=ctk.CTkFont(size=16, weight="bold"), text_color=COR_TEXTO).pack(pady=10)
+        # Cards de resumo (usa custo_aquisicao das peças para o lucro real)
+        resumo = self.repo.resumo_financeiro()
+        quadro_resumo = ctk.CTkFrame(janela, fg_color="transparent")
+        quadro_resumo.pack(fill="x", padx=20, pady=(0, 8))
+        cards = [
+            ("ENTRADAS", f"R$ {resumo['entradas']:.2f}", COR_VERDE),
+            ("SAÍDAS", f"R$ {resumo['saidas']:.2f}", "#EF4444"),
+            ("SALDO", f"R$ {resumo['saldo']:.2f}", COR_VERDE if resumo['saldo'] >= 0 else "#EF4444"),
+            ("CUSTO DAS PEÇAS", f"R$ {resumo['custo_pecas']:.2f}", COR_LARANJA),
+            ("LUCRO ESTIMADO", f"R$ {resumo['lucro_estimado']:.2f}", COR_VERDE if resumo['lucro_estimado'] >= 0 else "#EF4444"),
+        ]
+        for titulo, valor, cor in cards:
+            card = ctk.CTkFrame(quadro_resumo, fg_color=COR_CARD, corner_radius=8, border_width=1, border_color=COR_BORDA)
+            card.pack(side="left", expand=True, fill="x", padx=4)
+            ctk.CTkLabel(card, text=titulo, font=ctk.CTkFont(size=10, weight="bold"), text_color=COR_MUTED).pack(pady=(8, 0))
+            ctk.CTkLabel(card, text=valor, font=ctk.CTkFont(size=13, weight="bold"), text_color=cor).pack(pady=(2, 8))
         dados = self.repo.obter_dados_financeiros_grafico()
         if not dados: ctk.CTkLabel(janela, text="Nenhum registro financeiro encontrado.\nFinalize uma OS ou adicione despesas.", text_color=COR_MUTED).pack(pady=50); return
         fig, ax = plt.subplots(figsize=(8, 4.5), facecolor=COR_FUNDO); ax.set_facecolor(COR_CARD)
@@ -372,24 +484,63 @@ class AplicacaoOficinaPro(ctk.CTk):
         ax.legend(facecolor=COR_CARD, edgecolor=COR_BORDA, labelcolor=COR_TEXTO); ax.margins(x=0.15)
         canvas = FigureCanvasTkAgg(fig, master=janela); canvas.draw(); canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=20)
 
+    def _janela_comissoes(self):
+        janela = ctk.CTkToplevel(self)
+        janela.title("Relatório de Comissões"); janela.geometry("720x460"); janela.configure(fg_color=COR_FUNDO)
+        janela.attributes("-topmost", True); janela.lift(); janela.focus_force(); janela.grab_set()
+        ctk.CTkLabel(janela, text="Comissões por Mecânico", font=ctk.CTkFont(size=16, weight="bold"), text_color=COR_TEXTO).pack(pady=10)
+        quadro_filtro = ctk.CTkFrame(janela, fg_color="transparent"); quadro_filtro.pack(fill="x", padx=20)
+        ctk.CTkLabel(quadro_filtro, text="Período:").pack(side="left", padx=(0, 6))
+        opcoes_periodo = {"Últimos 30 dias": 30, "Últimos 60 dias": 60, "Últimos 90 dias": 90, "Todo o histórico": 0}
+        cb_periodo = ctk.CTkComboBox(quadro_filtro, values=list(opcoes_periodo.keys()), width=170)
+        cb_periodo.set("Últimos 30 dias"); cb_periodo.pack(side="left", padx=4)
+        cols_com = ("mec", "qtd", "serv", "taxa", "com")
+        tree_com = ttk.Treeview(janela, columns=cols_com, show="headings")
+        for c, t, w, a in zip(cols_com, ["Mecânico", "Serviços", "Total M.O. (R$)", "Comissão", "Comissão (R$)"], [180, 80, 130, 90, 120], ["w", "center", "e", "center", "e"]):
+            tree_com.heading(c, text=t); tree_com.column(c, width=w, anchor=a)
+        tree_com.pack(fill="both", expand=True, padx=20, pady=10)
+        lbl_total = ctk.CTkLabel(janela, text="", font=ctk.CTkFont(size=14, weight="bold"), text_color=COR_VERDE)
+        lbl_total.pack(pady=(0, 12))
+
+        def recarregar():
+            for l in tree_com.get_children(): tree_com.delete(l)
+            dias = opcoes_periodo.get(cb_periodo.get(), 30)
+            linhas = self.repo.relatorio_comissoes(dias)
+            total = 0.0
+            for r in linhas:
+                total += r["comissao"]
+                tree_com.insert("", "end", values=(r["mecanico"], r["qtd_servicos"], f"{r['total_servicos']:.2f}", f"{r['taxa_comissao']*100:.0f}%", f"R$ {r['comissao']:.2f}"))
+            lbl_total.configure(text=f"TOTAL A PAGAR EM COMISSÕES: R$ {total:.2f}")
+
+        cb_periodo.configure(command=lambda _: recarregar())
+        recarregar()
+
     def _janela_gerenciamento(self):
         janela = ctk.CTkToplevel(self)
         janela.title("Gerenciar Cadastros"); janela.geometry("650x450"); janela.configure(fg_color=COR_FUNDO)
         janela.attributes("-topmost", True); janela.lift(); janela.grab_set()
         tabview = ctk.CTkTabview(janela); tabview.pack(fill="both", expand=True, padx=10, pady=10)
-        tab_mec = tabview.add("Mecânicos"); tab_cli = tabview.add("Clientes / Veículos"); tab_est = tabview.add("Estoque de Peças")
+        tab_mec = tabview.add("Mecânicos"); tab_cli = tabview.add("Clientes / Veículos"); tab_est = tabview.add("Estoque de Peças"); tab_ofi = tabview.add("Oficina")
 
         e_mec_nome = ctk.CTkEntry(tab_mec, placeholder_text="Nome", width=200); e_mec_nome.pack(pady=5)
         e_mec_esp = ctk.CTkEntry(tab_mec, placeholder_text="Especialidade", width=200); e_mec_esp.pack(pady=5)
-        e_mec_tel = ctk.CTkEntry(tab_mec, placeholder_text="Telefone", width=200); e_mec_tel.pack(pady=5)
+        e_mec_tel = ctk.CTkEntry(tab_mec, placeholder_text="WhatsApp (DDD+numero)", width=200); e_mec_tel.pack(pady=5)
+        e_mec_taxa = ctk.CTkEntry(tab_mec, placeholder_text="Comissão (%) - ex: 20", width=200); e_mec_taxa.insert(0, "20"); e_mec_taxa.pack(pady=5)
         def add_mec():
-            try: self.repo.salvar_mecanico(Mecanico(e_mec_nome.get(), e_mec_tel.get(), e_mec_esp.get(), 0.20)); self._atualizar_combo_mecanicos(); messagebox.showinfo("Sucesso", "Mecânico cadastrado!")
+            try:
+                taxa = float(e_mec_taxa.get().replace(",", ".")) / 100
+            except ValueError:
+                messagebox.showerror("Erro", "Comissão inválida: digite o percentual (ex: 20 para 20%)."); return
+            try:
+                self.repo.salvar_mecanico(Mecanico(e_mec_nome.get(), e_mec_tel.get(), e_mec_esp.get(), taxa)); self._atualizar_combo_mecanicos(); messagebox.showinfo("Sucesso", "Mecânico cadastrado!")
+            except ValueError as e:
+                messagebox.showerror("Erro de Cadastro", str(e))
             except Exception as e: messagebox.showerror("Erro", str(e))
         ctk.CTkButton(tab_mec, text="Adicionar Mecânico", command=add_mec).pack(pady=10)
 
         def atualizar_lista_cli():
             for l in tree_cli.get_children(): tree_cli.delete(l)
-            with self.db.obter_conexao() as conn:
+            with self.db.sessao() as conn:
                 res = conn.cursor().execute("SELECT v.placa, v.marca_modelo, c.nome FROM veiculos v JOIN clientes c ON v.cliente_id = c.id").fetchall()
                 for r in res: tree_cli.insert("", "end", values=(r["placa"], r["marca_modelo"], r["nome"]))
         tree_cli = ttk.Treeview(tab_cli, columns=("placa", "mod", "dono"), show="headings"); tree_cli.heading("placa", text="Placa"); tree_cli.heading("mod", text="Modelo"); tree_cli.heading("dono", text="Dono")
@@ -401,11 +552,15 @@ class AplicacaoOficinaPro(ctk.CTk):
         e_est_margem = ctk.CTkEntry(tab_est, placeholder_text="Margem de Lucro (%)", width=200); e_est_margem.insert(0, "50"); e_est_margem.pack(pady=5)
         
         def add_estoque():
+            if not e_est_nome.get().strip():
+                messagebox.showerror("Erro", "Informe o nome da peça."); return
             try:
                 custo = float(e_est_custo.get().replace(",", ".")); margem = float(e_est_margem.get().replace(",", "."))
-                self.repo.salvar_peca_estoque(e_est_nome.get(), int(e_est_qtd.get()), custo, margem)
+                qtd = int(e_est_qtd.get())
+                criou_nova = self.repo.salvar_peca_estoque(e_est_nome.get(), qtd, custo, margem)
                 preco_venda = custo * (1 + margem/100)
-                messagebox.showinfo("Sucesso", f"Peça cadastrada!\nPreço de Venda sugerido: R$ {preco_venda:.2f}")
+                msg_extra = "\n(Já existia: quantidade somada ao saldo atual)" if not criou_nova else ""
+                messagebox.showinfo("Sucesso", f"{'Peça cadastrada' if criou_nova else 'Estoque reposto'}!\nPreço de Venda sugerido: R$ {preco_venda:.2f}{msg_extra}")
                 self._atualizar_campo_descricao(); atualizar_lista_est()
             except ValueError: messagebox.showerror("Erro", "Preencha os valores corretamente.")
         
@@ -419,6 +574,20 @@ class AplicacaoOficinaPro(ctk.CTk):
         tree_est = ttk.Treeview(tab_est, columns=("nome", "qtd", "custo", "margem", "venda"), show="headings", height=5)
         tree_est.heading("nome", text="Peça"); tree_est.heading("qtd", text="Qtd"); tree_est.heading("custo", text="Custo"); tree_est.heading("margem", text="Margem"); tree_est.heading("venda", text="Preço Venda")
         tree_est.pack(fill="both", expand=True, pady=5); ctk.CTkButton(tab_est, text="Atualizar Estoque", command=atualizar_lista_est).pack(); atualizar_lista_est()
+
+        # --- ABA OFICINA (configurações usadas no PDF) ---
+        ctk.CTkLabel(tab_ofi, text="Dados da Oficina (aparecem nos orçamentos PDF)", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_LARANJA).pack(pady=(10, 6))
+        e_ofi_nome = ctk.CTkEntry(tab_ofi, placeholder_text="Nome da Oficina", width=320); e_ofi_nome.insert(0, self.repo.obter_config("oficina_nome")); e_ofi_nome.pack(pady=4)
+        e_ofi_cnpj = ctk.CTkEntry(tab_ofi, placeholder_text="CNPJ", width=320); e_ofi_cnpj.insert(0, self.repo.obter_config("oficina_cnpj")); e_ofi_cnpj.pack(pady=4)
+        e_ofi_whats = ctk.CTkEntry(tab_ofi, placeholder_text="WhatsApp de Contato", width=320); e_ofi_whats.insert(0, self.repo.obter_config("oficina_whatsapp")); e_ofi_whats.pack(pady=4)
+        e_ofi_end = ctk.CTkEntry(tab_ofi, placeholder_text="Endereço", width=320); e_ofi_end.insert(0, self.repo.obter_config("oficina_endereco")); e_ofi_end.pack(pady=4)
+        def salvar_oficina():
+            self.repo.salvar_config("oficina_nome", e_ofi_nome.get().strip())
+            self.repo.salvar_config("oficina_cnpj", e_ofi_cnpj.get().strip())
+            self.repo.salvar_config("oficina_whatsapp", e_ofi_whats.get().strip())
+            self.repo.salvar_config("oficina_endereco", e_ofi_end.get().strip())
+            messagebox.showinfo("Sucesso", "Dados da oficina salvos!")
+        ctk.CTkButton(tab_ofi, text="Salvar Configurações", fg_color=COR_VERDE, command=salvar_oficina).pack(pady=12)
 
 if __name__ == "__main__":
     app = AplicacaoOficinaPro()

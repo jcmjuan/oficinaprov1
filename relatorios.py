@@ -3,6 +3,10 @@ Oficina Pro v1.0 - Geração de Documentos em PDF
 Arquivo: relatorios.py
 """
 import os
+import re
+import shutil
+from datetime import datetime
+from typing import Optional
 
 # Tratamento de erro caso o ReportLab não esteja instalado na máquina do professor
 try:
@@ -22,13 +26,77 @@ class EmissorPDF:
         self.pasta_saida = pasta_saida
         if not os.path.exists(self.pasta_saida):
             os.makedirs(self.pasta_saida)
+        self.migrar_pdfs_antigos()
 
-    def gerar_pdf_ordem_servico(self, os_obj: OrdemServico) -> str:
+    # --- ORGANIZAÇÃO: pasta por OS, arquivos versionados por status + timestamp ---
+
+    @staticmethod
+    def nome_pasta_os(numero_os: int, placa: str) -> str:
+        """Nome puro da pasta de documentos da OS (não cria nada)."""
+        placa_limpa = placa.replace("-", "").replace(" ", "").upper()
+        return f"OS_{numero_os:04d}_{placa_limpa}"
+
+    @staticmethod
+    def _prefixo_status(status: str) -> str:
+        return "ORCAMENTO" if status == "Orçamento" else "ORDEM_SERVICO"
+
+    def pasta_da_os(self, numero_os: int, placa: str) -> str:
+        """Pasta de documentos da OS, criada se necessário."""
+        pasta = os.path.join(self.pasta_saida, self.nome_pasta_os(numero_os, placa))
+        if not os.path.exists(pasta):
+            os.makedirs(pasta)
+        return pasta
+
+    def migrar_pdfs_antigos(self) -> None:
+        """Move PDFs no formato antigo (OS_0001_PLACA.pdf soltos na raiz) para a pasta de sua OS.
+        Idempotente: rodar novamente não duplica arquivos. Arquivos travados/abertos ficam para a próxima execução."""
+        padrao_antigo = re.compile(r"^OS_(\d{4,})_([A-Za-z0-9]+)\.pdf$", re.IGNORECASE)
+        try:
+            nomes = os.listdir(self.pasta_saida)
+        except OSError:
+            return
+        for nome in nomes:
+            candidatura = padrao_antigo.match(nome)
+            caminho_origem = os.path.join(self.pasta_saida, nome)
+            if not candidatura or not os.path.isfile(caminho_origem):
+                continue
+            numero_os, placa = candidatura.groups()
+            pasta_destino = os.path.join(self.pasta_saida, self.nome_pasta_os(int(numero_os), placa))
+            if not os.path.exists(pasta_destino):
+                os.makedirs(pasta_destino)
+            destino = os.path.join(pasta_destino, nome)
+            tentativa = 2
+            while os.path.exists(destino):
+                base, ext = os.path.splitext(nome)
+                destino = os.path.join(pasta_destino, f"{base}_{tentativa}{ext}")
+                tentativa += 1
+            try:
+                shutil.move(caminho_origem, destino)
+            except OSError:
+                continue
+
+    def gerar_pdf_ordem_servico(self, os_obj: OrdemServico, dados_oficina: Optional[dict] = None) -> str:
+        """Usa dados_oficina quando disponível; fallback para os valores padrão.
+        Salva em documentos/OS_NNNN_PLACA/ com nome versionado: status + número + carimbo (nunca sobrescreve)."""
         if not REPORTLAB_DISPONIVEL:
             raise ImportError("A biblioteca 'reportlab' não está instalada. Execute: pip install reportlab")
+        conf = {
+            "nome": (dados_oficina or {}).get("nome") or "Oficina Pro Auto Center Ltda.",
+            "cnpj": (dados_oficina or {}).get("cnpj") or "00.000.000/0001-00",
+            "whatsapp": (dados_oficina or {}).get("whatsapp") or "(51) 98888-7777",
+            "endereco": (dados_oficina or {}).get("endereco") or "",
+        }
 
-        nome_arquivo = f"OS_{os_obj.numero_os:04d}_{os_obj.veiculo.placa}.pdf"
-        caminho_completo = os.path.join(self.pasta_saida, nome_arquivo)
+        # Pasta da OS + nome versionado (status congelado + carimbo de data/hora).
+        # Nada é sobrescrito: cada geração é um novo registro do ciclo da OS.
+        pasta_os = self.pasta_da_os(os_obj.numero_os, os_obj.veiculo.placa)
+        prefixo = self._prefixo_status(os_obj.status)
+        base_nome = f"{prefixo}_{os_obj.numero_os:04d}_{os_obj.veiculo.placa}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        caminho_completo = os.path.join(pasta_os, f"{base_nome}.pdf")
+        tentativa = 2
+        while os.path.exists(caminho_completo):  # colisão extrema (mesmo segundo): guiar com sufixo
+            caminho_completo = os.path.join(pasta_os, f"{base_nome}_{tentativa}.pdf")
+            tentativa += 1
 
         doc = SimpleDocTemplate(
             caminho_completo, pagesize=A4,
@@ -58,7 +126,7 @@ class EmissorPDF:
         dados_cabecalho = [
             [Paragraph("<b>OFICINA PRO v1.0</b><br/>Gestão Mecânica & Balcão", estilo_topo),
              Paragraph(f"{'ORÇAMENTO' if os_obj.status == 'Orçamento' else 'ORDEM DE SERVIÇO'}<br/><b>#{os_obj.numero_os:04d}</b><br/><font size=8 color='#64748B'>Status: {os_obj.status.upper()}</font>", estilo_os_badge)],
-            [Paragraph("Oficina Pro Auto Center Ltda.<br/>CNPJ: 00.000.000/0001-00 | WhatsApp: (51) 98888-7777", estilo_sub),
+            [Paragraph(f"{conf['nome']}<br/>CNPJ: {conf['cnpj']} | WhatsApp: {conf['whatsapp']}" + (f"<br/>{conf['endereco']}" if conf['endereco'] else ""), estilo_sub),
              Paragraph(f"Data: <b>{os_obj.data_abertura}</b>", ParagraphStyle('Data', parent=estilo_celula, alignment=2, textColor=colors.HexColor("#64748B")))]
         ]
         tabela_topo = Table(dados_cabecalho, colWidths=[110 * mm, 70 * mm])

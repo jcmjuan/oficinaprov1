@@ -3,8 +3,8 @@ Oficina Pro v1.0 - Camada de Persistência SQLite
 Arquivo: banco.py
 """
 import sqlite3
+from contextlib import contextmanager
 from typing import List, Optional
-from datetime import datetime
 from dominio import Cliente, Mecanico, Veiculo, Peca, MaoDeObra, OrdemServico
 
 class GerenciadorBanco:
@@ -12,13 +12,24 @@ class GerenciadorBanco:
         self.__caminho_db = caminho_db
         self.__inicializar_tabelas()
 
+    @contextmanager
+    def sessao(self):
+        """Contexto transacional que commita em sucesso, faz rollback em erro e SEMPRE fecha a conexão."""
+        conn = sqlite3.connect(self.__caminho_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            with conn:  # commit em sucesso / rollback em exceção
+                yield conn
+        finally:
+            conn.close()
+
     def obter_conexao(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.__caminho_db)
         conn.row_factory = sqlite3.Row
         return conn
 
     def __inicializar_tabelas(self) -> None:
-        with self.obter_conexao() as conn:
+        with self.sessao() as conn:
             cursor = conn.cursor()
             cursor.executescript("""
                 CREATE TABLE IF NOT EXISTS clientes (
@@ -85,6 +96,11 @@ class GerenciadorBanco:
                     preco_custo REAL NOT NULL DEFAULT 0.0,
                     margem_lucro REAL NOT NULL DEFAULT 50.0
                 );
+                -- CONFIGURAÇÕES DA OFICINA (chave/valor)
+                CREATE TABLE IF NOT EXISTS config (
+                    chave TEXT PRIMARY KEY,
+                    valor TEXT NOT NULL
+                );
             """)
             conn.commit()
 
@@ -94,7 +110,7 @@ class RepositorioOficina:
 
     # --- CLIENTES ---
     def salvar_cliente(self, cliente: Cliente) -> int:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute("INSERT INTO clientes (nome, telefone, cpf_cnpj) VALUES (?, ?, ?)", (cliente.nome, cliente.telefone, cliente.cpf_cnpj))
@@ -104,31 +120,31 @@ class RepositorioOficina:
                 raise ValueError("Já existe um cliente cadastrado com este CPF/CNPJ.")
 
     def obter_cliente_por_id(self, id_cliente: int) -> Optional[Cliente]:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             r = conn.cursor().execute("SELECT * FROM clientes WHERE id = ?", (id_cliente,)).fetchone()
             return Cliente(r["nome"], r["telefone"], r["cpf_cnpj"], r["id"]) if r else None
 
     # --- MECÂNICOS ---
     def salvar_mecanico(self, mecanico: Mecanico) -> int:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             cursor.execute("INSERT INTO mecanicos (nome, telefone, especialidade, taxa_comissao) VALUES (?, ?, ?, ?)", (mecanico.nome, mecanico.telefone, mecanico.especialidade, mecanico.taxa_comissao))
             conn.commit()
             return cursor.lastrowid
 
     def listar_mecanicos(self) -> List[Mecanico]:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             return [Mecanico(r["nome"], r["telefone"], r["especialidade"], r["taxa_comissao"], r["id"]) for r in conn.cursor().execute("SELECT * FROM mecanicos ORDER BY nome").fetchall()]
 
     def obter_mecanico_por_id(self, id_mec: int) -> Optional[Mecanico]:
         if not id_mec: return None
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             r = conn.cursor().execute("SELECT * FROM mecanicos WHERE id = ?", (id_mec,)).fetchone()
             return Mecanico(r["nome"], r["telefone"], r["especialidade"], r["taxa_comissao"], r["id"]) if r else None
 
     # --- VEÍCULOS ---
     def salvar_veiculo(self, veiculo: Veiculo) -> int:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute("INSERT INTO veiculos (placa, marca_modelo, ano, quilometragem, cliente_id) VALUES (?, ?, ?, ?, ?)", (veiculo.placa, veiculo.marca_modelo, veiculo.ano, veiculo.quilometragem, veiculo.cliente_id))
@@ -139,12 +155,12 @@ class RepositorioOficina:
 
     def obter_veiculo_por_placa(self, placa: str) -> Optional[Veiculo]:
         placa_limpa = placa.replace("-", "").replace(" ", "").upper()
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             r = conn.cursor().execute("SELECT * FROM veiculos WHERE placa = ?", (placa_limpa,)).fetchone()
             return Veiculo(r["placa"], r["marca_modelo"], r["ano"], r["quilometragem"], r["cliente_id"], r["id"]) if r else None
 
     def historico_manutencoes_veiculo(self, placa: str) -> List[dict]:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             res = conn.cursor().execute("""
                 SELECT os.data_abertura, COALESCE(m.nome, 'Não Atribuído') AS mecanico, i.descricao, (i.quantidade * i.valor_unitario) as subtotal
                 FROM ordens_servico os JOIN veiculos v ON os.veiculo_id = v.id
@@ -155,7 +171,9 @@ class RepositorioOficina:
 
     # --- ORDENS DE SERVIÇO ---
     def criar_ordem_servico(self, os_obj: OrdemServico) -> int:
-        with self.db.obter_conexao() as conn:
+        if not os_obj.veiculo.id or not os_obj.cliente.id:
+            raise ValueError("OS não pode ser criada sem cliente/veículo cadastrados no banco.")
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             mec_id = os_obj.mecanico_principal.id if os_obj.mecanico_principal else None
             cursor.execute("INSERT INTO ordens_servico (data_abertura, status, desconto, veiculo_id, cliente_id, mecanico_id) VALUES (?, ?, ?, ?, ?, ?)", (os_obj.data_abertura, os_obj.status, os_obj.desconto, os_obj.veiculo.id, os_obj.cliente.id, mec_id))
@@ -163,7 +181,7 @@ class RepositorioOficina:
             return cursor.lastrowid
 
     def carregar_ordem_completa(self, numero_os: int) -> Optional[OrdemServico]:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             row_os = cursor.execute("SELECT * FROM ordens_servico WHERE numero_os = ?", (numero_os,)).fetchone()
             if not row_os: return None
@@ -173,7 +191,7 @@ class RepositorioOficina:
             mecanico = self.obter_mecanico_por_id(row_os["mecanico_id"])
             
             os_obj = OrdemServico(row_os["numero_os"], veiculo, cliente, row_os["data_abertura"], row_os["status"], mecanico)
-            os_obj.aplicar_desconto(row_os["desconto"])
+            os_obj.definir_desconto_salvo(row_os["desconto"] or 0.0)
             
             for r_item in cursor.execute("SELECT * FROM itens_os WHERE numero_os = ?", (numero_os,)).fetchall():
                 if r_item["tipo_item"] == "PECA":
@@ -185,28 +203,57 @@ class RepositorioOficina:
             return os_obj
 
     def salvar_itens_e_fechamento_os(self, os_obj: OrdemServico) -> None:
-        with self.db.obter_conexao() as conn:
+        """
+        Persiste itens e status da OS, resolvendo o estoque de forma consistente:
+        1. Devolve ao estoque as peças debitadas por esta OS anteriormente (lidas do DB).
+        2. Debita as peças da lista atual da OS.
+        3. Reconcilia o financeiro: ENTRADA ao finalizar, remoção se o status voltar atrás.
+        Tudo em uma única transação (o `with` da conexão faz rollback em exceção).
+        """
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
             mec_id = os_obj.mecanico_principal.id if os_obj.mecanico_principal else None
+
+            # 1. RESTAURA o estoque das peças que estavam debitadas para esta OS
+            anteriores = cursor.execute(
+                "SELECT descricao, SUM(quantidade) AS total FROM itens_os WHERE numero_os = ? AND tipo_item = 'PECA' GROUP BY descricao",
+                (os_obj.numero_os,)
+            ).fetchall()
+            for r in anteriores:
+                cursor.execute("UPDATE estoque SET quantidade = quantidade + ? WHERE nome = ?", (r["total"], r["descricao"]))
+
             cursor.execute("UPDATE ordens_servico SET status = ?, desconto = ?, mecanico_id = ? WHERE numero_os = ?", (os_obj.status, os_obj.desconto, mec_id, os_obj.numero_os))
             cursor.execute("DELETE FROM itens_os WHERE numero_os = ?", (os_obj.numero_os,))
-            
+
+            # 2. DEBITA as peças da lista atual (validando disponibilidade já com o estoque restaurado)
             for item in os_obj.itens:
                 if isinstance(item, Peca):
+                    peca = cursor.execute("SELECT id, quantidade FROM estoque WHERE nome = ?", (item.descricao,)).fetchone()
+                    if peca:  # peça catalogada: valida e debita
+                        if peca["quantidade"] < item.quantidade:
+                            raise ValueError(f"Estoque insuficiente para '{item.descricao}'. Disponível: {int(peca['quantidade'])}.")
+                        cursor.execute("UPDATE estoque SET quantidade = quantidade - ? WHERE id = ?", (item.quantidade, peca["id"]))
+                    # peça fora do catálogo (comprada avulsa): apenas lançada na OS, sem movimento de estoque
                     cursor.execute("INSERT INTO itens_os (numero_os, tipo_item, descricao, quantidade, valor_unitario, codigo_sku, custo_aquisicao) VALUES (?, 'PECA', ?, ?, ?, ?, ?)", (os_obj.numero_os, item.descricao, item.quantidade, item.valor_unitario, item.codigo_sku, item.custo_aquisicao))
                 else:
                     mec_item_id = item.mecanico_responsavel.id if hasattr(item, 'mecanico_responsavel') and item.mecanico_responsavel else mec_id
                     cursor.execute("INSERT INTO itens_os (numero_os, tipo_item, descricao, quantidade, valor_unitario, mecanico_id) VALUES (?, 'MAO_DE_OBRA', ?, ?, ?, ?)", (os_obj.numero_os, item.descricao, item.quantidade, item.valor_unitario, mec_item_id))
-            
+
+            # 3. RECONCILIA o financeiro com o status
             if os_obj.status == "Finalizado":
                 ja_existe = cursor.execute("SELECT id FROM financeiro WHERE numero_os = ?", (os_obj.numero_os,)).fetchone()
                 if not ja_existe:
-                    cursor.execute("INSERT INTO financeiro (data, descricao, valor, tipo, numero_os) VALUES (?, ?, ?, 'ENTRADA', ?)", 
-                                   (datetime.now().strftime("%d/%m/%Y"), f"Recebimento OS #{os_obj.numero_os:04d}", os_obj.calcular_total_liquido(), os_obj.numero_os))
+                    cursor.execute("INSERT INTO financeiro (data, descricao, valor, tipo, numero_os) VALUES (?, ?, ?, 'ENTRADA', ?)",
+                                   (os_obj.data_abertura, f"Recebimento OS #{os_obj.numero_os:04d}", os_obj.calcular_total_liquido(), os_obj.numero_os))
+                else:
+                    # Re-salvamento de OS finalizada (ex.: ajuste não-GUI): mantém a ENTRADA coerente com o total atual
+                    cursor.execute("UPDATE financeiro SET valor = ? WHERE numero_os = ? AND tipo = 'ENTRADA'", (os_obj.calcular_total_liquido(), os_obj.numero_os))
+            else:
+                cursor.execute("DELETE FROM financeiro WHERE numero_os = ? AND tipo = 'ENTRADA'", (os_obj.numero_os,))
             conn.commit()
 
     def listar_ordens_painel(self, filtro_placa: str = "") -> List[dict]:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             termo = f"%{filtro_placa.replace('-', '').replace(' ', '').upper()}%"
             linhas = conn.cursor().execute("""
                 SELECT os.numero_os, os.data_abertura, v.placa, v.marca_modelo, c.nome AS cliente_nome,
@@ -223,33 +270,95 @@ class RepositorioOficina:
             } for r in linhas]
 
     # --- ESTOQUE COM MARGEM ---
-    def salvar_peca_estoque(self, nome: str, qtd: int, preco_custo: float, margem_lucro: float) -> None:
-        with self.db.obter_conexao() as conn:
-            conn.cursor().execute("INSERT INTO estoque (nome, quantidade, preco_custo, margem_lucro) VALUES (?, ?, ?, ?)", (nome, qtd, preco_custo, margem_lucro))
-            conn.commit()
-
-    def listar_estoque(self) -> List[dict]:
-        with self.db.obter_conexao() as conn:
-            return [dict(r) for r in conn.cursor().execute("SELECT * FROM estoque ORDER BY nome").fetchall()]
-
-    def obter_dados_peca(self, nome_peca: str) -> Optional[dict]:
-        with self.db.obter_conexao() as conn:
-            r = conn.cursor().execute("SELECT * FROM estoque WHERE nome = ?", (nome_peca,)).fetchone()
-            return dict(r) if r else None
-
-    def dar_baixa_estoque(self, nome_peca: str, qtd: int) -> bool:
-        with self.db.obter_conexao() as conn:
+    def salvar_peca_estoque(self, nome: str, qtd: int, preco_custo: float, margem_lucro: float) -> bool:
+        """Cadastra a peça ou, se o nome já existir, soma a quantidade e atualiza custo/margem.
+        Retorna True se criou um registro novo, False se apenas atualizou um existente."""
+        with self.db.sessao() as conn:
             cursor = conn.cursor()
-            peca = cursor.execute("SELECT id, quantidade FROM estoque WHERE nome = ?", (nome_peca,)).fetchone()
-            if not peca or peca["quantidade"] < qtd:
+            existente = cursor.execute("SELECT id FROM estoque WHERE nome = ?", (nome,)).fetchone()
+            if existente:
+                cursor.execute("UPDATE estoque SET quantidade = quantidade + ?, preco_custo = ?, margem_lucro = ? WHERE id = ?", (qtd, preco_custo, margem_lucro, existente["id"]))
+                conn.commit()
                 return False
-            cursor.execute("UPDATE estoque SET quantidade = quantidade - ? WHERE id = ?", (qtd, peca["id"]))
+            cursor.execute("INSERT INTO estoque (nome, quantidade, preco_custo, margem_lucro) VALUES (?, ?, ?, ?)", (nome, qtd, preco_custo, margem_lucro))
             conn.commit()
             return True
 
-    # --- FINANCEIRO ---
+    def listar_estoque(self) -> List[dict]:
+        with self.db.sessao() as conn:
+            return [dict(r) for r in conn.cursor().execute("SELECT * FROM estoque ORDER BY nome").fetchall()]
+
+    def obter_dados_peca(self, nome_peca: str) -> Optional[dict]:
+        with self.db.sessao() as conn:
+            r = conn.cursor().execute("SELECT * FROM estoque WHERE nome = ?", (nome_peca,)).fetchone()
+            return dict(r) if r else None
+
+    # --- FINANCEIRO E RELATÓRIOS ---
+    def atualizar_km_veiculo(self, id_veiculo: int, nova_km: int) -> None:
+        """Persiste a quilometragem atualizada. A regra de não-regressão está no domínio (Veiculo.atualizar_km)."""
+        with self.db.sessao() as conn:
+            conn.cursor().execute("UPDATE veiculos SET quilometragem = ? WHERE id = ?", (nova_km, id_veiculo))
+            conn.commit()
+
+    def relatorio_comissoes(self, dias: int = 30) -> List[dict]:
+        """Comissões por mecânico considerando os serviços de mão de obra dos últimos `dias` (0 = todo o histórico)."""
+        from datetime import datetime, timedelta
+        with self.db.sessao() as conn:
+            res = conn.cursor().execute("""
+                SELECT m.nome AS mecanico, m.taxa_comissao, i.descricao, i.quantidade, i.valor_unitario, os.data_abertura
+                FROM itens_os i
+                JOIN ordens_servico os ON i.numero_os = os.numero_os
+                JOIN mecanicos m ON i.mecanico_id = m.id
+                WHERE i.tipo_item = 'MAO_DE_OBRA'
+            """).fetchall()
+        limite = (datetime.now() - timedelta(days=dias)) if dias > 0 else None
+        resumo: dict = {}
+        for r in res:
+            if limite is not None:
+                try:
+                    data_item = datetime.strptime(r["data_abertura"], "%d/%m/%Y")
+                except (ValueError, TypeError):
+                    continue  # data inválida/antiga: item ignorado no filtro de período
+                if data_item < limite:
+                    continue
+            linha = resumo.setdefault(r["mecanico"], {
+                "mecanico": r["mecanico"],
+                "taxa_comissao": r["taxa_comissao"],
+                "total_servicos": 0.0,
+                "comissao": 0.0,
+                "qtd_servicos": 0
+            })
+            subtotal = r["quantidade"] * r["valor_unitario"]
+            linha["total_servicos"] += subtotal
+            linha["comissao"] += subtotal * r["taxa_comissao"]
+            linha["qtd_servicos"] += 1
+        return sorted(resumo.values(), key=lambda l: l["comissao"], reverse=True)
+
+    def resumo_financeiro(self) -> dict:
+        """Totais gerais do fluxo de caixa + custo das peças vendidas (para lucro real)."""
+        with self.db.sessao() as conn:
+            cursor = conn.cursor()
+            entradas = cursor.execute("SELECT COALESCE(SUM(valor), 0.0) AS t FROM financeiro WHERE tipo = 'ENTRADA'").fetchone()["t"]
+            saidas = cursor.execute("SELECT COALESCE(SUM(valor), 0.0) AS t FROM financeiro WHERE tipo = 'SAIDA'").fetchone()["t"]
+            custo_pecas = cursor.execute("""
+                SELECT COALESCE(SUM(quantidade * COALESCE(custo_aquisicao, 0)), 0.0) AS t
+                FROM itens_os WHERE tipo_item = 'PECA'
+            """).fetchone()["t"]
+        return {"entradas": entradas, "saidas": saidas, "custo_pecas": custo_pecas,
+                "saldo": entradas - saidas, "lucro_estimado": entradas - custo_pecas - saidas}
+
+    def obter_config(self, chave: str, padrao: str = "") -> str:
+        with self.db.sessao() as conn:
+            r = conn.cursor().execute("SELECT valor FROM config WHERE chave = ?", (chave,)).fetchone()
+            return r["valor"] if r else padrao
+
+    def salvar_config(self, chave: str, valor: str) -> None:
+        with self.db.sessao() as conn:
+            conn.cursor().execute("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor", (chave, valor))
+            conn.commit()
+
     def obter_dados_financeiros_grafico(self) -> dict:
-        with self.db.obter_conexao() as conn:
+        with self.db.sessao() as conn:
             res = conn.cursor().execute("""
                 SELECT SUBSTR(data, 4, 7) AS mes_ano, tipo, SUM(valor) as total
                 FROM financeiro GROUP BY mes_ano, tipo ORDER BY mes_ano
