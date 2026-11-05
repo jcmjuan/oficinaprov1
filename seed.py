@@ -1,5 +1,5 @@
 """
-Oficina Pro v1.0 - Script para popular o banco de dados com dados de teste robustos.
+Oficina Pro - Script para popular o banco de dados com dados de teste.
 Arquivo: seed.py
 Execução: python seed.py     (depois: python app.py)
 

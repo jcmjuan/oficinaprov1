@@ -20,7 +20,7 @@ python gerar_etapa3.py  # gera a documentação (Etapa3.pdf)
 
 | Requisito | Onde |
 |---|---|
-| ≥ 5 classes | 9 no domínio + 4 de infraestrutura |
+| ≥ 5 classes | 8 no domínio + 4 de infraestrutura = 12 |
 | Herança | `Pessoa → Cliente/Mecanico`, `ItemOS → Peca/MaoDeObra` |
 | Polimorfismo | `obter_resumo()`, `calcular_subtotal()` |
 | Associação | OS ↔ Cliente/Veículo/Mecânico/Itens |

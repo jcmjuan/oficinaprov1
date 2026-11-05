@@ -1,19 +1,6 @@
 ---
-DIAGRAMA DE CLASSES - OficinaPro v1.0 (corrigido)
+DIAGRAMA DE CLASSES - OficinaPro
 ---
-Como visualizar: cole o conteúdo deste arquivo no Mermaid Live Editor (https://mermaid.live/)
-e exporte como PNG para substituir o diagrama-de-classes.png na documentação.
-
-O que foi corrigido em relação à versão anterior:
-1. __validar_telefone agora aparece com visibilidade PRIVADA (-), como no código.
-2. Multiplicidade OrdemServico-ItemOS alterada para 0..* (o código aceita OS sem itens).
-3. Inclusos os atributos que materializam as associações em OrdemServico
-   (itens, veiculo, cliente, mecanico_principal) - associação = atributo do tipo da outra classe.
-4. Inclusos getters/properties (placa, quilometragem, cpf_cnpj, custo_aquisicao, desconto...)
-   e os métodos privados __formatar_placa e __str__ (nomenclatura igual ao Python).
-5. MaoDeObra -> Mecanico agora é 0..1 (o construtor aceita mecânico não atribuído).
-6. Novos membros introduzidos nesta versão do código: remover_item(), definir_desconto_salvo(),
-   telefone_digitos() e a configuração da oficina (tabela config).
 
 ===============================================================
 DIAGRAMA 1 - CAMADA DE DOMÍNIO (regras de negócio / POO)
